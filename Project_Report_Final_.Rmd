@@ -1,0 +1,998 @@
+---
+title: "Baseball Statistics"
+author: "Stryder, Padraic, Chesteran, Shyan"
+date: "5/8/2021"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+ 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+##
+
+## Introduction
+
+The title of our database is called Baseball Databank. In our project, we will be analyzing our Baseball database and writing brief documentation about it. The data set contains Excel sheets consisting of all the baseball statistical data from the years 1871-2015, we will only be using the data from 1995 to 2015; and will be including 7 data frames. The first dataframe is batting which contains statistics related to batting. The second data frame battingPost, contains batting statistics in the postseason. The third Fielding, contains variables related to fielding statistics. The fourth Pitching, contains pitching statistics for a given player on a given year. The fifth pitchingPost, contains statistics for pitching in the postseason. The sixth master, contains data about each player’s name, date of birth, and biographical information in the dataset. And lastly Salaries, contains a player’s salary in a given year. Every data frame is linked together with PlayerID. 
+
+For our dataset, we are going to answer a series of 6 questions that we believe our dataset can answer. First, we want to know if there is a correlation between salaries and the performance of players? To determine the correlation we are going to compare player’s WAR to their salaries.  Second, we want to know how the pressure of the postseason impacts a player’s performance. We will solve this by comparing a player’s WAR in the regular season to a player’s WAR in the postseason. Third, we want to determine the shortfalls of using traditional baseball statistics to rate a player’s performance. In order to figure out this question, we will compare an advanced statistic such as wOBA and compare it with a traditional statistical counterpart such as Batting Average. We will also compare players who perform well according to traditional baseball statistics and see if the advanced statistics tell the same story. Fourth, we want to determine if there is a correlation between how much a player is paid and the individual accolades he earns by comparing the salaries of award winners. Fifth, we want to determine the correlation between the player’s age and his overall performance by examining the relationship between age and WAR. Finally, we want to determine whether birth location has an influence on how a player performs and to solve this we will compare  birth location to WAR.
+
+## Intial Goals
+
+  1.    Initial Goals
+  2.    Can we predict the number of runs a player will score over a season?
+  3.    Can we predict a position player's performance over a season? 
+  4.    Can we predict a pitcher's performance over a season? 
+  5.    What are the flaws of traditional baseball statistics?
+  6.    Is salary a good predictor of Awards won?
+  7.    Can we predict the number of earned runs (ER) a pitcher will allow over a season?
+  8.    Can we predict a position player’s batting postseason performance by using their regular season data?
+
+## Library used
+
+```{r, echo=FALSE}
+library(ggbeeswarm)
+library(ggforce)
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(caret)
+library(rpart)
+library(car)
+library(e1071)
+library(kernlab)
+library(randomForest)
+library(sjmisc)
+library(lme4)
+library(ModelMetrics)
+library(knitr)
+```
+## Importing the data frames
+```{r, echo=FALSE}
+AwardsPlayers <- read_csv("AwardsPlayers.csv")
+Batting <- read_csv("Batting.csv")
+BattingPost <- read_csv("BattingPost.csv")
+Fielding <- read_csv("Fielding.csv")
+Master <- read_csv("Master.csv")
+Pitching <- read_csv("Pitching.csv")
+PitchingPost <- read_csv("PitchingPost.csv")
+Salaries <- read_csv("Salaries.csv")
+```
+## Filtering the data set
+```{r, echo=FALSE}
+##Filtering dataframes to only include data between 1995-2015 
+AwardsPlayers <- AwardsPlayers %>% filter(yearID >= 1995)
+Batting <- Batting %>% filter(yearID >= 1995)
+BattingPost <- BattingPost %>% filter(yearID >= 1995)
+Fielding <- Fielding %>% filter(yearID >= 1995)
+Pitching <- Pitching %>% filter(yearID >= 1995)
+PitchingPost <- PitchingPost %>% filter(yearID >= 1995)
+Master <- Master %>% filter(finalGame >= as.Date("1995-04-25"))
+Salaries <- Salaries %>% filter(yearID >= 1995)
+```
+## Transforming the Batting Statistics
+```{r, echo=FALSE}
+## Transforming Batting Statistics
+## removing undesirable variable
+Batting2 <- Batting %>% subset(select = -c(teamID, lgID, SF, GIDP, stint))
+## na is equivalent to 0
+Batting2[is.na(Batting2)] = 0
+## Combining all player batting stats into seasons
+Batting3 <- aggregate(. ~ playerID + yearID, data = Batting2, sum)
+## Creating on base average (OBA) higher indicates better players
+Batting3 <- Batting3 %>% mutate(OBA = ((H + BB + HBP)/(AB+ BB + HBP)))
+## Creating extra base hits (XBH)
+Batting3 <- Batting3 %>% mutate(XBH = (`2B` + `3B` + HR))
+## Creating Slugging (SLG) higher indicates better players
+Batting3 <- Batting3 %>% mutate(SLG = (((H-XBH)+(2*`2B`)+(3*`3B`)+(4*HR))/(AB)))
+## Creating On Base Plus Slugging (OPS) higher indicates better players
+Batting3 <- Batting3 %>% mutate(OPS = (OBA + SLG))
+## Creating on base average Stolen Base Percentage (SBP) higher indicates better players
+Batting3 <- Batting3 %>% mutate(SBP = ((SB)/(SB + CS)))
+## Creating on singles stat
+Batting3 <- Batting3 %>% mutate(`1B` = (H-XBH))
+## Creating on singles stat
+Batting3 <- Batting3 %>% mutate(BO = (AB - H))  
+## Creating BA
+Batting3 <- Batting3 %>% mutate(BA = (AB/H))
+## Creating wOBA
+Batting3 <- Batting3 %>% mutate(wOBA = (.69*(BB) +.72*(HBP) +.89*(H - XBH) + 1.27*(`2B`) + 1.62*(`3B`) + HR*2.10) / (AB + BB - IBB + SH +HBP))
+```
+## Transforming the Fielding (Position Players) Statistics
+```{r, echo=FALSE}
+##Transforming fielding statistics
+## removing undesirable variables 
+SFielding2 <- Fielding %>% subset(select = -c(teamID, lgID,InnOuts, WP, SB, CS, ZR, GS, stint))
+## removing pitchers from fielding
+SFielding2 <- SFielding2 %>% filter(POS != "P")
+## removing position
+SFielding2 <- SFielding2 %>% subset(select = -c(POS))
+## na is equivalent to 0
+SFielding2[is.na(SFielding2)] = 0
+## Combining all player fielding stats into seasons
+SFielding3 <- aggregate(. ~  playerID + yearID, data = SFielding2, sum)
+## Combines the data frames batting and fielding together contain only position player observations 
+## creating Fielding Percentage(FP)
+SFielding3 <- SFielding3 %>% mutate(FP = ((PO + A)/(PO + A + E)))
+```
+## Tranforming the Pitching Statistics
+```{r, echo=FALSE}
+## removing non numeric variables in pitching
+pitching2 <- Pitching %>% subset(select = -c(teamID, lgID, IBB, SH, SF, GIDP, ERA))
+## combining all the stats from the different stints of the pitchers
+pitching2 <- aggregate(. ~ playerID + yearID, data = pitching2, sum)
+##Creating a combined ERA
+pitching2 <- pitching2 %>% mutate(ERA = ((ER *9)/(IPouts/3)))
+## removing the stint column
+pitching2 <- pitching2 %>% subset(select = -c(stint))
+## removing non numeric variables in fielding
+fielding2 <- Fielding %>% subset(select = -c(teamID, lgID, GS, InnOuts,PB, WP, SB, CS, ZR))
+## filtering out all non pitchers
+fielding2 <- fielding2 %>% filter(POS == "P")
+## removing the position column
+fielding2 <- fielding2 %>% subset(select = -c(POS))
+## combining all the stats from the different stints of the pitchers
+fielding2 <- aggregate(. ~ playerID + yearID, data = fielding2, sum)
+## removing the stint column
+fielding2 <- fielding2 %>% subset(select = -c(stint))
+## complete data frame containing all statistics recorded for pitchers
+pitcher_stats <- left_join(fielding2, pitching2, by = c("playerID", "yearID"))
+## removing the playerID column
+pitcher_stats2 <- pitcher_stats %>% subset(select = -c(playerID))
+## combining everything by year and averaging all the states league wide
+pitcher_stats2 <- aggregate(. ~ yearID, data = pitcher_stats2, mean)
+## removing the all non important columns
+pitcher_stats3 <- pitcher_stats2 %>% subset(select = c(yearID, ERA, HR, BB, HBP, SO, IPouts))
+## converting IPouts to IP
+pitcher_stats3$IPouts <- pitcher_stats3$IPouts/3
+##renaming all the columns
+pitcher_stats3 <- pitcher_stats3 %>% rename(lgERA = ERA, lgHR = HR, lgBB = BB, lgHBP = HBP, lgSO = SO, lgIP = IPouts)
+##calculating the FIP constant
+pitcher_stats3 <- pitcher_stats3 %>% mutate(FIPconstant =  lgERA - (((13*lgHR)+(3*(lgBB+lgHBP))-(2*lgSO))/lgIP))
+## create new dataframe with all the league avg states and the FIP constant per year
+pitcher_stats_complete <- left_join(pitcher_stats, pitcher_stats3, by = c("yearID"))
+## removing G.y and renaming G.x
+pitcher_stats_complete <- pitcher_stats_complete %>% subset(select = -c(G.y))
+pitcher_stats_complete <- pitcher_stats_complete %>% rename(G = G.x)
+## converting and renaming IPouts to IP
+pitcher_stats_complete$IPouts <- pitcher_stats_complete$IPouts/3
+pitcher_stats_complete <- pitcher_stats_complete %>% rename(IP = IPouts)
+## calculating the FIP for every player  
+pitcher_stats_complete <- pitcher_stats_complete %>% mutate(FIP = ((13*HR)+(3*(BB+HBP))-(2*SO))/IP + FIPconstant)
+##filtering out pitchers with low playing time
+pitcher_stats_complete <- pitcher_stats_complete %>% filter(IP >= 20)
+##filtering out infinites 
+pitcher_stats_complete <- pitcher_stats_complete %>% filter(is.finite(FIP))
+```
+## Creating WAR
+```{r, echo=FALSE}
+## Contains both fielding and batting statistics for each player by season
+Player_WAR <- full_join(Batting3, SFielding3, by = c("playerID", "yearID"))  
+## Removing undesirable variables
+##Player_WAR <- Player_WAR %>% subset(select = c(playerID, yearID, OPS, SBP, FP, G.x))
+## Calculating the means
+OPSmean <- mean(Player_WAR$OPS, na.rm ="TRUE")
+SBPmean <- mean(Player_WAR$SBP, na.rm = "TRUE")
+FPmean <- mean(Player_WAR$FP, na.rm = "TRUE")
+## Creating a statistic that determines value of player based on fielding, batting, and base running
+Player_WAR <- Player_WAR %>% mutate(WAR = ((OPS/OPSmean)+(SBP/SBPmean)+(FP/FPmean)))
+```
+## Batting Post
+```{r, echo = FALSE}
+##Comparing Regular VS Postseason OPS
+## removing undesirable variable
+BattingPost2 <- BattingPost %>% subset(select = -c(teamID, lgID, SF, GIDP, round))
+## na is equivalent to 0
+BattingPost2[is.na(BattingPost2)] = 0
+## Combining all player batting stats into seasons
+BattingPost3 <- aggregate(. ~ playerID + yearID, data = BattingPost2, sum)
+## Creating on base average (OBA)
+BattingPost3 <- BattingPost3 %>% mutate(OBA = ((H + BB + HBP)/(AB+ BB + HBP)))
+## Creating extra base hits (XBH)
+BattingPost3 <- BattingPost3 %>% mutate(XBH = (`2B` + `3B` + HR))
+## Creating Slugging (SLG)
+BattingPost3 <- BattingPost3 %>% mutate(SLG = (((H-XBH)+(2*`2B`)+(3*`3B`)+(4*HR))/(AB)))
+## Creating On Base Plus Slugging (OPS)
+BattingPost3 <- BattingPost3 %>% mutate(OPS = (OBA + SLG))
+## Creating on singles stat
+BattingPost3 <- BattingPost3 %>% mutate(`1B` = (H-XBH))
+## Creating on singles stat
+BattingPost3 <- BattingPost3 %>% mutate(BO = (AB - H))
+```
+## Functions
+```{r, echo =FALSE}
+rmse <- function(error)
+{
+  sqrt(mean(error^2))
+}
+RSQUARE <- function(y_actual,y_predict){
+  cor(y_actual,y_predict)^2
+}
+```
+##  Question 1 Predicting Runs (R)
+```{r}
+##WAR vs. Salary
+WAR_Salary <- left_join(Player_WAR, Salaries,by = c("playerID", "yearID"))
+WAR_Salary <- WAR_Salary %>% rename(G = G.x)
+WAR_Salary2 <- na.omit(WAR_Salary)
+WAR_Salary2 <- WAR_Salary2 %>% subset(select = -c(playerID, yearID))
+WAR_Salary2 <- WAR_Salary2 %>% filter(AB > 100)
+WAR_Salary2 <- WAR_Salary2 %>% filter(G > 20)
+```
+## Visualization
+```{r, echo =FALSE}
+ggplot(data = WAR_Salary2, mapping = aes(x = AB, y = R, color = wOBA)) + geom_point() + geom_smooth(color = "red")
+ggplot(data = WAR_Salary2, mapping = aes(x = H, y = R, color = wOBA)) + geom_point() + geom_smooth(color = "red")
+```
+## partitioning the data
+```{r, echo=FALSE}
+R.ts <- WAR_Salary2$R %>% createDataPartition(p = .8, list = FALSE)
+R.train <- WAR_Salary2[R.ts,]
+R.test <- WAR_Salary2[-R.ts,]
+```
+## training data
+
+## MLR
+```{r}
+modelMLRR <- lm(R ~ `1B` + `2B` + `3B` + HR + BB + HBP + SB + CS + salary,data = R.train)
+vif(modelMLRR)
+summary(modelMLRR)
+predictedR <- predict(modelMLRR, R.train)
+RMSE(predictedR, R.train$R)
+R2(predictedR, R.train$R)
+```
+## SVR
+```{r}
+modelSVRR <- svm(R ~ `1B` + `2B` + `3B` + HR + BB + HBP + SB + CS + salary , data = R.train)
+predictedR2 <- predict(modelSVRR, R.train)
+RMSE(predictedR2, R.train$R)
+R2(predictedR2, R.train$R)
+```
+## DT
+```{r}
+fitR <- rpart( R ~ `1B` + `2B` + `3B` + HR + BB + HBP + SB + CS + salary, data = R.train, method = "anova")
+plot(fitR, uniform = TRUE,
+     main = "Runs Decision Tree using Regression")
+dev.off()
+print(fitR)
+summary(fitR)
+predictedR3 <- predict(fitR, R.train, method = "anova")
+RMSE(predictedR3, R.train$R)
+R2(predictedR3, R.train$R)
+```
+## testing data
+
+## MLR
+```{r}
+predictedR4 <- predict(modelMLRR, R.test)
+RMSE(R.test$R,predictedR4)
+R2(R.test$R,predictedR4)
+```
+## SVR
+```{r}
+predictedR5 <- predict(modelSVRR, R.test)
+RMSE(predictedR5, R.test$R)
+R2(predictedR5, R.test$R)
+```
+## DT
+```{r}
+predictedR6 <- predict(fitR, R.test, method = "anova")
+RMSE(predictedR6, R.test$R)
+R2(predictedR6, R.test$R)
+```
+
+
+
+
+
+
+
+
+
+##Question 2 Position Position Player performance
+
+##WAR vs Salary
+##visualization
+```{r}
+ggplot(data = WAR_Salary, mapping = aes(x = salary, y = WAR, color = AB)) + geom_point() + geom_smooth()
+```
+
+##modeling
+##MLR
+```{r, echo=FALSE}
+WAR_Salary2 <- na.omit(WAR_Salary)
+WAR_Salary2 <- WAR_Salary2 %>% subset(select = -c(playerID, yearID))
+WAR_Salary2 <- WAR_Salary2 %>% filter(AB > 100)
+WAR_Salary2 <- WAR_Salary2 %>% filter(G > 20)
+
+set.seed(123)
+training.samples <- WAR_Salary2$WAR %>% createDataPartition(p = 0.8, list = FALSE)
+train.data <- WAR_Salary2[training.samples, ]
+test.data <- WAR_Salary2[-training.samples, ]
+```
+
+```{r}
+model1b <- lm(WAR ~ SB + CS + SO + IBB + HBP + SH + PB + FP + H, data = train.data)
+summary(model1b)
+
+##train Data
+predictedR <- predict(model1b, train.data)
+RMSE(predictedR, train.data$WAR)
+R2(predictedR, train.data$WAR)
+
+##test Data
+predictedR <- predict(model1b, test.data)
+RMSE(predictedR, test.data$WAR)
+R2(predictedR, test.data$WAR)
+```
+
+##SVR
+```{r}
+model_1_SVR <- svm(WAR ~ SB + CS + SO + IBB + HBP + SH + PB + FP + H, data = train.data)
+
+##Train Data
+predicted.classes <- predict(model_1_SVR, train.data)
+RMSE(predicted.classes, train.data$WAR)
+R2(predicted.classes, train.data$WAR)
+
+##Test Data
+predicted.classes <- predict(model_1_SVR, test.data)
+
+RMSE(predicted.classes, test.data$WAR)
+R2(predicted.classes, test.data$WAR)
+```
+
+##DT
+```{r}
+DT_1_WAR <- rpart(WAR ~ SB + CS + SO + IBB + HBP + SH + PB + FP + H, data = train.data, method = "anova")
+
+plot(DT_1_WAR, uniform = TRUE,
+     main = "Runs Decision Tree using Regression")
+dev.off()
+print(DT_1_WAR)
+summary(DT_1_WAR)
+
+##train
+predictedR3 <- predict(DT_1_WAR, train.data, method = "anova")
+RMSE(predictedR3, train.data$WAR)
+R2(predictedR3, train.data$WAR)
+
+##test
+predictedR3 <- predict(DT_1_WAR, test.data, method = "anova")
+RMSE(predictedR3, test.data$WAR)
+R2(predictedR3, test.data$WAR)
+```
+
+## WAR vs AGE
+```{r}
+## removing all unnecessary columns in master
+master1 <- Master %>%  subset(select = c("playerID", "birthYear", "birthCountry", "birthState", "birthCity", "nameFirst", "nameLast", "nameGiven"))
+
+## adding the contents of master to the pitching stats and calculating the age for every player for every year
+pitcher_stats_complete_AGE <- left_join(pitcher_stats_complete, master1, by = c("playerID"))
+pitcher_stats_complete_AGE <- pitcher_stats_complete_AGE %>% mutate(age = yearID-birthYear)
+
+## adding the contents of master to the player war and calculating the age for every player for every year
+Player_WAR_AGE <- left_join(Player_WAR, master1, by = c("playerID"))
+Player_WAR_AGE <- Player_WAR_AGE %>% mutate(age = yearID-birthYear)
+```
+
+##visualization
+```{r}
+ggplot(data = Player_WAR_AGE) + geom_smooth(mapping = aes(x = age, y = WAR))
+```
+
+##MLR
+```{r}
+Player_WAR_AGE <- na.omit(Player_WAR_AGE)
+
+set.seed(123)
+training.samples <- Player_WAR_AGE$WAR %>% createDataPartition(p = 0.8, list = FALSE)
+train.data <- Player_WAR_AGE[training.samples, ]
+test.data <- Player_WAR_AGE[-training.samples, ]
+```
+
+```{r}
+MLR_5_WAR <- lm(WAR ~ H + SB + CS + SH + SLG + PB + age , data = train.data)
+summary(MLR_5_WAR)
+
+##train Data
+predictedR <- predict(model1b, train.data)
+RMSE(predictedR, train.data$WAR)
+R2(predictedR, train.data$WAR)
+
+##test Data
+predictedR <- predict(model1b, test.data)
+
+RMSE(predictedR, test.data$WAR)
+R2(predictedR, test.data$WAR)
+```
+
+##SVR
+```{r}
+SVR_5_WAR <- svm(WAR ~ H + SB + CS + SH + SLG + PB + age , data = train.data)
+
+##Train Data
+predicted.classes <- predict(SVR_5_WAR, train.data)
+RMSE(predicted.classes, train.data$WAR)
+R2(predicted.classes, train.data$WAR)
+
+##Test Data
+predicted.classes <- predict(SVR_5_WAR, test.data)
+
+RMSE(predicted.classes, test.data$WAR)
+R2(predicted.classes, test.data$WAR)
+```
+
+##DT
+```{r}
+DT_5_WAR <- rpart(WAR ~ H + SB + CS + SH + SLG + PB + age, data = train.data, method = "anova")
+
+plot(DT_5_WAR, uniform = TRUE,
+     main = "Runs Decision Tree using Regression")
+dev.off()
+print(DT_5_WAR)
+summary(DT_5_WAR)
+
+##train
+predictedR3 <- predict(DT_5_WAR, train.data, method = "anova")
+RMSE(predictedR3, train.data$WAR)
+R2(predictedR3, train.data$WAR)
+
+##test
+predictedR3 <- predict(DT_1_WAR, test.data, method = "anova")
+RMSE(predictedR3, test.data$WAR)
+R2(predictedR3, test.data$WAR)
+```
+
+##WAR vs birthState
+```{r}
+stateavgFIP <- pitcher_stats_complete_AGE %>% subset(select = c(birthCountry, birthState, FIP))
+stateavgWAR <- Player_WAR_AGE %>% subset(select = c(birthCountry, birthState, WAR))
+
+stateavgFIP <- stateavgFIP %>% filter(birthCountry == "USA")
+stateavgWAR <- stateavgWAR %>% filter(birthCountry == "USA")
+
+stateavgFIP <- stateavgFIP %>% subset(select = -c(birthCountry))
+stateavgWAR <- stateavgWAR %>% subset(select = -c(birthCountry))
+
+stateavgFIP <- stateavgFIP %>% filter(is.finite(FIP))
+stateavgWAR <- stateavgWAR %>% filter(is.finite(WAR))
+
+stateavgFIP <- aggregate(. ~ birthState, data = stateavgFIP, mean)
+stateavgWAR <- aggregate(. ~ birthState, data = stateavgWAR, mean)
+
+stateFIP <- pitcher_stats_complete_AGE
+stateWAR <- Player_WAR_AGE
+
+stateFIP <- stateFIP %>% filter(birthCountry == "USA")
+stateWAR <- stateWAR %>% filter(birthCountry == "USA")
+
+stateFIP$birthState <- as.factor(stateFIP$birthState)
+stateWAR$birthState <- as.factor(stateWAR$birthState)
+
+stateFIP <- na.omit(stateFIP)
+stateWAR <- na.omit(stateWAR)
+```
+
+##visualization
+```{r}
+ggplot(data=stateavgWAR, aes(x=birthState, y=WAR)) + geom_bar(stat="identity", color="blue", fill="white")
+```
+
+##modeling
+##MLR
+```{r}
+set.seed(123)
+training.samples <- stateWAR$WAR %>% createDataPartition(p = 0.8, list = FALSE)
+train.data <- stateWAR[training.samples, ]
+test.data <- stateWAR[-training.samples, ]
+```
+
+```{r}
+MVR_6_WAR <- lm(WAR ~ AB + R + SB + CS + SH + OBA + SLG + birthState, data = train.data)
+summary(MVR_6_WAR)
+
+##train Data
+predictedR <- predict(MVR_6_WAR, train.data)
+
+RMSE(predictedR, train.data$WAR)
+R2(predictedR, train.data$WAR)
+
+##test Data
+predictedR <- predict(MVR_6_WAR, test.data)
+
+RMSE(predictedR, test.data$WAR)
+R2(predictedR, test.data$WAR)
+```
+
+##SVR
+```{r}
+SVR_6_WAR <- svm(WAR ~ AB + R + SB + CS + SH + OBA + SLG + birthState, data = train.data)
+
+##Train Data
+predicted.classes <- predict(SVR_6_WAR, train.data)
+RMSE(predicted.classes, train.data$WAR)
+R2(predicted.classes, train.data$WAR)
+
+##Test Data
+predicted.classes <- predict(SVR_6_WAR, test.data)
+
+RMSE(predicted.classes, test.data$WAR)
+R2(predicted.classes, test.data$WAR)
+```
+
+##DT
+```{r}
+DT_6_WAR <- rpart(WAR ~ AB + R + SB + CS + SH + OBA + SLG + birthState, data = train.data, method = "anova")
+
+plot(DT_6_WAR, uniform = TRUE,
+     main = "Runs Decision Tree using Regression")
+dev.off()
+print(DT_6_WAR)
+summary(DT_6_WAR)
+
+##train
+predictedR3 <- predict(DT_6_WAR, train.data, method = "anova")
+RMSE(predictedR3, train.data$WAR)
+R2(predictedR3, train.data$WAR)
+
+##test
+predictedR3 <- predict(DT_6_WAR, test.data, method = "anova")
+RMSE(predictedR3, test.data$WAR)
+R2(predictedR3, test.data$WAR)
+```
+
+##Question 3
+##FIP vs Salary
+
+##visualization
+```{r}
+FIP_Salary <- left_join(pitcher_stats_complete, Salaries,by = c("playerID", "yearID"))
+##Adding age
+##filtering out small sample sizes (games)
+FIP_Salary <- FIP_Salary %>% filter(IP > 30)
+##filtering out outliers(WAR)
+FIP_Salary <- FIP_Salary %>% filter(FIP < 9)
+##Visualization
+ggplot(data = FIP_Salary, mapping = aes(x = salary, y = FIP, color = IP)) + geom_point() +geom_smooth()
+
+```
+##modeling
+```{r}
+FIP_Salary2 <- FIP_Salary %>% subset(select = -c(playerID, yearID, teamID, lgID))
+
+set.seed(123)
+training.samples <- FIP_Salary2$FIP %>% createDataPartition(p = 0.8, list = FALSE)
+train.data <- FIP_Salary2[training.samples, ]
+test.data <- FIP_Salary2[-training.samples, ]
+```
+
+##MLR
+```{r}
+model1c <- lm(FIP ~ PO + E + DP + W + L + CG + HR + BB + BAOpp + WP + HBP + ERA, data = train.data) 
+summary(model1c)
+
+##train Data
+predictedR <- predict(model1c, train.data)
+RMSE(predictedR, train.data$FIP)
+R2(predictedR, train.data$FIP)
+
+##test Data
+predictedR <- predict(model1c, test.data)
+RMSE(predictedR, test.data$FIP)
+R2(predictedR, test.data$FIP)
+
+```
+##DT
+```{r}
+DT_1_FIP <- rpart(FIP ~ PO + E + DP + W + L + CG + HR + BB + BAOpp + WP + HBP + ERA, data = train.data, method = "anova")
+
+plot(DT_1_FIP, uniform = TRUE,
+     main = "Runs Decision Tree using Regression")
+dev.off()
+print(DT_1_FIP)
+summary(DT_1_FIP)
+
+##Train Data
+predictedR3 <- predict(DT_1_FIP, train.data, method = "anova")
+RMSE(predictedR3, train.data$FIP)
+R2(predictedR3, train.data$FIP)
+
+##Test Data
+predictedR <- predict(DT_1_FIP, data = train.data, method = "anova")
+RMSE(predictedR, train.data$FIP)
+R2(predictedR, train.data$FIP)
+```
+
+
+##FIP vs Age
+##visualization
+```{r}
+ggplot(data = pitcher_stats_complete_AGE) + geom_smooth(mapping = aes(x = age, y = FIP))
+```
+
+##Modeling
+##MLR
+```{r}
+set.seed(123)
+training.samples <- pitcher_stats_complete_AGE$FIP %>% createDataPartition(p = 0.8, list = FALSE)
+train.data1 <- pitcher_stats_complete_AGE[training.samples, ]
+test.data1 <- pitcher_stats_complete_AGE[-training.samples, ]
+```
+
+```{r}
+MVR_5_FIP <- lm(FIP ~ PO + A + E + DP + W + L + CG + HR + BB + BAOpp + WP + HBP + BK + ERA, data = train.data)
+
+##Train Data
+predicted.classes <- predict(MVR_5_FIP, train.data)
+
+RMSE(predicted.classes, train.data$FIP)
+R2(predicted.classes, train.data$FIP)
+
+##Test Data
+predicted.classes <- predict(MVR_5_FIP, test.data)
+
+RMSE(predicted.classes, test.data$FIP)
+R2(predicted.classes, test.data$FIP)
+
+```
+##DT
+```{r}
+DT_5_FIP <- rpart(FIP ~ PO + A + E + DP + W + L + CG + HR + BB + BAOpp + WP + HBP + BK + ERA, data = train.data, method = "anova")
+
+plot(DT_5_FIP, uniform = TRUE,
+     main = "Runs Decision Tree using Regression")
+dev.off()
+print(DT_5_FIP)
+summary(DT_5_FIP)
+
+##train
+predictedR3 <- predict(DT_5_FIP, train.data, method = "anova")
+RMSE(predictedR3, train.data$FIP)
+R2(predictedR3, train.data$FIP)
+
+##test
+predictedR3 <- predict(DT_5_FIP, test.data, method = "anova")
+RMSE(predictedR3, test.data$FIP)
+R2(predictedR3, test.data$FIP)
+```
+
+##FIP vs birthState
+
+##Visualization
+```{r}
+ggplot(data=stateavgFIP, aes(x=birthState, y=FIP)) + geom_bar(stat="identity", color="blue", fill="white")
+```
+
+##models
+##MLR
+```{r}
+set.seed(123)
+training.samples <- stateFIP$FIP %>% createDataPartition(p = 0.8, list = FALSE)
+train.data <- stateFIP[training.samples, ]
+test.data <- stateFIP[-training.samples, ]
+```
+
+##SVR
+```{r}
+SVR_6_FIP <- svm(FIP ~  G + PO + A + E + DP + W + L + CG + SHO + SV + HR + BB + SO + BAOpp + WP + HBP + GF + ERA + birthState, data = train.data)
+
+##Train Data
+predicted.classes <- predict(SVR_6_FIP, train.data)
+RMSE(predicted.classes, train.data$FIP)
+R2(predicted.classes, train.data$FIP)
+
+##Test Data
+predicted.classes <- predict(SVR_6_FIP, test.data)
+
+RMSE(predicted.classes, test.data$FIP)
+R2(predicted.classes, test.data$FIP)
+```
+
+##DT
+```{r}
+DT_6_FIP <- rpart(FIP ~  G + PO + A + E + DP + W + L + CG + SHO + SV + HR + BB + SO + BAOpp + WP + HBP + GF + ERA + birthState, data = train.data, method = "anova")
+
+plot(DT_6_FIP, uniform = TRUE,
+     main = "Runs Decision Tree using Regression")
+dev.off()
+print(DT_6_FIP)
+summary(DT_6_FIP)
+
+##train
+predictedR3 <- predict(DT_6_FIP, train.data, method = "anova")
+RMSE(predictedR3, train.data$FIP)
+R2(predictedR3, train.data$FIP)
+
+##test
+predictedR3 <- predict(DT_6_FIP, test.data, method = "anova")
+RMSE(predictedR3, test.data$FIP)
+R2(predictedR3, test.data$FIP)
+```
+
+
+
+
+
+
+
+## Question 4 What are the flaws of traditional baseball statistics?
+
+## Visualization
+```{r}
+ggplot(data = Batting3, mapping = aes(x = yearID, y = wOBA)) + geom_point(color = "blue") + geom_smooth()
+ggplot(data = Batting3, mapping = aes(x = yearID, y = BA)) + geom_point(color = "red") + geom_smooth()
+```
+
+## Modeling
+```{r}
+#Linear regression
+
+Batting3[is.na(Batting3)] = 0
+Batting3$BA[is.infinite(Batting$BA)] = 0
+Batting3$wOBA[is.infinite(Batting$wOBA)] = 0
+
+##model <-lm(wOBA ~ BA, data = Batting3)
+##summary(model)
+
+##view(Batting3)
+#Multiple Linear Regression
+##modelMult <- lm(wOBA ~ BA + G + AB + R + H + XBH + OBP + `2B` + `3B` + RBI + SB + CS + BB + SO + IBB+ HBP + SH, data = Batting3)
+##vif(modelMult)
+##summary(modelMult)
+```
+
+ 
+
+## Question 5 - IS SALARY A GOOD PREDICTOR OF AWARDS WON?
+
+## Transformation
+
+I removed the tie and notes variables from the dataframes, then I removed the teamID column since I didn't need it
+
+```{r}
+# Remove tie and notes variables from AwardsPlayers dataframe
+Awards2 <- AwardsPlayers[ -c(5:6)]
+kable(Awards2[1:15, ], caption = "Awards2 df after removal and filter")
+Salaries2 <- Salaries[ -c(2)]
+kable(Salaries2[1:15, ], caption = "Salaries2 df after removal and filter")
+```
+
+From here, I joined the two dataframes using a left join by their key and omitted any na values.
+
+```{r}
+AwardedSalaries <- left_join(Salaries2, Awards2, by = c("playerID","yearID"))
+AwardedSalaries <- na.omit(AwardedSalaries)
+kable(AwardedSalaries[1:15, ], caption = "Dataframe created from Left Join")
+```
+
+## Visualization 
+
+To find any correlation among this data, I created a scatterplot visualization of the AwardedSalaries dataframe.
+
+```{r}
+ggplot(AwardedSalaries,aes(awardID, salary)) + 
+  geom_beeswarm(color = "blue") + coord_flip()
+```
+
+For more exploration on this question, I created a boxplot as well.
+
+```{r}
+ggplot(AwardedSalaries,aes(awardID, salary)) +  geom_boxplot() + coord_flip()
+```
+
+## Testing for Correlation b/w Salaries and Awards
+
+Furthermore, I conducted a test to compare the variance of Salaries for each Award to the overall variance of the AwardedSalaries dataframe. I broke the main dataframe into smaller ones and computed the variance for each, then composed them in a list.
+
+```{r}
+# Filter every award into its own variable
+ALCSMVP <- AwardedSalaries %>% filter(awardID == "ALCS MVP")
+AllStarMVP <- AwardedSalaries %>% filter(awardID == "All-Star Game MVP")
+BabeRuthAward <- AwardedSalaries %>% filter(awardID == "Babe Ruth Award")
+ComebackPlayer <- AwardedSalaries %>% filter(awardID == "Comeback Player of the Year")
+CyYoungAward <- AwardedSalaries %>% filter(awardID == "Cy Young Award")
+GoldGloveAward <- AwardedSalaries %>% filter(awardID == "Gold Glove")
+HankAaronAward <- AwardedSalaries %>% filter(awardID == "Hank Aaron Award")
+MVPAward <- AwardedSalaries %>% filter(awardID == "Most Valuable Player")
+NLCSMVP <- AwardedSalaries %>% filter(awardID == "NLCS MVP")
+PTC <- AwardedSalaries %>% filter(awardID == "Pitching Triple Crown")
+RobertoAward <- AwardedSalaries %>% filter(awardID == "Roberto Clemente Award")
+RolaidsRelief <- AwardedSalaries %>% filter(awardID == "Rolaids Relief Man Award")
+RookieOfYear <- AwardedSalaries %>% filter(awardID == "Rookie of the Year")
+SilverSlugger <- AwardedSalaries %>% filter(awardID == "Silver Slugger")
+TripleCrown <- AwardedSalaries %>% filter(awardID == "Triple Crown")
+TSN_AllStar <- AwardedSalaries %>% filter(awardID == "TSN All-Star")
+TSN_Fireman <- AwardedSalaries %>% filter(awardID == "TSN Fireman of the Year")
+TSN_Pitcher <- AwardedSalaries %>% filter(awardID == "TSN Pitcher of the Year")
+TSN_Reliever <- AwardedSalaries %>% filter(awardID == "TSN Reliever of the Year")
+
+# Determine variance in salaries of each award
+ALCSMVPv = ALCSMVP$salary
+ALCSMVP_Variance = var(ALCSMVPv)
+
+ALLStarMVPv = AllStarMVP$salary
+AllStarMVP_Variance = var(ALLStarMVPv)
+
+BabeRuthAwardv = BabeRuthAward$salary
+BabeRuthAward_Variance = var(BabeRuthAwardv)
+
+ComebackPlayerv = ComebackPlayer$salary
+ComebackPlayer_Variance = var(ComebackPlayerv)
+
+CyYoungAwardv = CyYoungAward$salary
+CyYoungAward_Variance = var(CyYoungAwardv)
+
+GoldGloveAwardv = GoldGloveAward$salary
+GoldGloveAward_Variance = var(GoldGloveAwardv)
+
+HankAaronAwardv = HankAaronAward$salary
+HankAaronAward_Variance = var(HankAaronAwardv)
+
+MVPAwardv = MVPAward$salary
+MVPAward_Variance = var(MVPAwardv)
+
+NLCSMVPv = NLCSMVP$salary
+NLCSMVP_Variance = var(NLCSMVPv)
+
+PTCv = PTC$salary
+PTC_Variance = var(PTCv)
+
+RobertoAwardv = RobertoAward$salary
+RobertoAward_Variance = var(RobertoAwardv)
+
+RolaidsReliefv = RolaidsRelief$salary
+RolaidsRelief_Variance = var(RolaidsReliefv)
+
+RookieOfYearv = RookieOfYear$salary
+RookieOfYear_Variance = var(RookieOfYearv)
+
+SilverSluggerv = SilverSlugger$salary
+SilverSlugger_Variance = var(SilverSluggerv)
+
+TripleCrownv = TripleCrown$salary
+TripleCrown_Variance = var(TripleCrownv)
+
+TSN_AllStarv = TSN_AllStar$salary
+TSN_AllStar_Variance = var(TSN_AllStarv)
+
+TSN_Firemanv = TSN_Fireman$salary
+TSN_Fireman_Variance = var(TSN_Firemanv)
+
+TSN_Pitcherv = TSN_Pitcher$salary
+TSN_Pitcher_Variance = var(TSN_Pitcherv)
+
+TSN_Relieverv = TSN_Reliever$salary
+TSN_Reliever_Variance = var(TSN_Relieverv)
+
+# Create a table compiling salary variances by Award
+Awards <- c("ALCSMVP","AllStarMVP","BabeRuthAward","ComebackPlayer",
+            "CyYoungAward","GoldGloveAward","HankAaronAward","MVPAward",
+            "NLCSMVP","PTC","RobertoAward","RolaidsRelief","RookieOfTheYear",
+            "Silver Slugger","Triple Crown","TSN All-Star","TSN Fireman",
+            "TSN Pitcher","TSN Reliever")
+
+SalaryVariance <- c(ALCSMVP_Variance, AllStarMVP_Variance, BabeRuthAward_Variance, 
+                    ComebackPlayer_Variance, CyYoungAward_Variance, 
+                    GoldGloveAward_Variance, HankAaronAward_Variance, MVPAward_Variance, 
+                    NLCSMVP_Variance, PTC_Variance, RobertoAward_Variance, RolaidsRelief_Variance, 
+                    RookieOfYear_Variance, SilverSlugger_Variance, TripleCrown_Variance, 
+                    TSN_AllStar_Variance, TSN_Fireman_Variance, TSN_Pitcher_Variance, 
+                    TSN_Reliever_Variance)
+
+AwSalVar <- data.frame(Awards, SalaryVariance, stringsAsFactors = FALSE)
+
+kable(AwSalVar, caption = "Salary variance list by award")
+```
+
+Finally, I computed the overall variance of the AwardedSalaries dataframe and compared it to the individual variances of each award to reach the conclusion that Salary is not a good predictor of awards won.
+
+```{r}
+# Compute the variance of AwardedSalaries
+AwardedSalariesv = AwardedSalaries$salary
+AwardedSalaries_Variance = var(AwardedSalariesv)
+
+kable(AwardedSalaries_Variance, caption = "Variance of AwardedSalaries dataframe")
+```
+
+## Question 6 Predicting Earned Runs (ER)
+## Visualization
+```{r}
+ggplot(data = pitcher_stats_complete, mapping = aes(x = IP, y = ER)) + geom_point(color = "blue") + geom_smooth(color = "red")
+ggplot(data = pitcher_stats_complete, mapping = aes(x = BB, y = ER)) + geom_point(color = "blue") + geom_smooth(color = "red")
+```
+## partitioning the data
+```{r, echo=FALSE}
+ER.ts <- pitcher_stats_complete$ER %>% createDataPartition(p = .8, list = FALSE)
+ER.train <- pitcher_stats_complete[ER.ts,]
+ER.test <- pitcher_stats_complete[-ER.ts,]
+```
+## Training
+
+## MLR
+```{r}
+modelMLRER <- lm(ER ~ PO + A + CG + HR + BB + BAOpp + WP + HBP + SO,data = ER.train)
+vif(modelMLRER)
+summary(modelMLRER)
+predictER <- predict(modelMLRER, ER.train)
+RMSE(predictER, ER.train$ER)
+R2(predictER, ER.train$ER)
+```
+## SVR
+```{r}
+modelSVRER <- svm(ER ~ PO + A + DP + L + CG + HR + BB + BAOpp + WP + HBP,data = ER.train)
+predictedER <- predict(modelSVRER, ER.train)
+RMSE(predictedER, ER.train$ER)
+R2(predictedER, ER.train$ER)
+```
+## DT
+```{r}
+fitER <- rpart( ER ~ PO + A + DP + L + CG + HR + BB + BAOpp + WP + HBP, data = ER.train, method = "anova")
+plot(fitER, uniform = TRUE,
+     main = "Runs Decision Tree using Regression")
+dev.off()
+print(fitER)
+predictedER2 <- predict(fitER, ER.train, method = "anova")
+RMSE(predictedER, ER.train$ER)
+R2(predictedER, ER.train$ER)
+```
+## Testing
+
+## MLR
+```{r}
+predictER4 <- predict(modelMLRER, ER.test)
+RMSE(predictER4, ER.test$ER)
+R2(predictER4, ER.test$ER)
+```
+## SVR
+```{r}
+predictedER5 <- predict(modelSVRER,ER.test)
+RMSE(predictedER5, ER.test$ER)
+R2(predictedER5, ER.test$ER)
+```
+## DT
+```{r}
+predictedER6 <- predict(fitER, ER.test, method = "anova")
+RMSE(predictedER6, ER.test$ER)
+R2(predictedER6, ER.test$ER)
+```
+
+## Question 7 Regular Season OPS Vs Post Season OPS
+```{r, echo=FALSE}
+RvPOPS <-left_join(BattingPost3, Batting3,by = c("playerID", "yearID"))
+RvPOPS <- RvPOPS %>% filter( G.y > 30)
+RvPOPS <- RvPOPS %>% rename(Regular_Season_OPS = OPS.y)
+RvPOPS <- RvPOPS %>% rename(Post_Season_OPS = OPS.x)
+RvPOPS <- RvPOPS %>% rename(Regular_Season_AB = AB.y)
+RvPOPS <- RvPOPS %>% rename(Post_Season_AB = AB.x)
+RvPOPS <- na.omit(RvPOPS)
+```
+## Visualization
+```{r}
+ggplot(data = RvPOPS, mapping = aes(y = Post_Season_OPS, x = Regular_Season_OPS)) + geom_point(color = "blue") +geom_smooth()
+```
+## correlation test
+```{r}
+cor(RvPOPS$Regular_Season_OPS, RvPOPS$Post_Season_OPS)
+```
+## MLR
+```{r}
+model_PVRP <- lm(Post_Season_OPS ~ Regular_Season_OPS, data = RvPOPS)
+summary(model_PVRP)
+```
+
+## Investigating the low R-Squared Values
+```{r}
+ggplot(data = RvPOPS, mapping=aes(x=Regular_Season_AB, y=Post_Season_AB))+geom_point(color = "blue")
+```
+## Conclusion
+
+  When it comes to whether Salaries is a good predictor of awards won, based on the visualization and variance test we found that it is not. This could be due to Baseball as a sport paying players exorbitant amounts of money but also due to awards being given out for accomplishments and performance and not how much one makes, therefore the data and tests illustrate a reasonable result.
